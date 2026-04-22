@@ -1,69 +1,63 @@
-"""Transcription service using Google Cloud Speech-to-Text.
+"""Transcription service using faster-whisper (local whisper.cpp via CTranslate2).
 
-Handles both short (<1 min) and long audio files.
+Runs fully locally with no API limits or file size restrictions.
 """
 
 import logging
 from pathlib import Path
 
-from google.cloud import speech
+from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
+# Load model once at import time — "base" is fast and accurate enough for reels
+# Options: tiny, base, small, medium, large-v3
+_model: WhisperModel | None = None
+
+
+def _get_model() -> WhisperModel:
+    """Lazy-load the Whisper model."""
+    global _model
+    if _model is None:
+        logger.info("Loading Whisper model (base)...")
+        _model = WhisperModel("base", device="cpu", compute_type="int8")
+        logger.info("Whisper model loaded.")
+    return _model
+
 
 def transcribe_audio(audio_path: str) -> str:
-    """Transcribe an audio file using Google Cloud Speech-to-Text.
-
-    Uses synchronous recognition for short audio (<1 min)
-    and long_running_recognize for longer audio.
+    """Transcribe an audio file using faster-whisper (local).
 
     Args:
-        audio_path: Path to the WAV audio file (16kHz mono PCM)
+        audio_path: Path to the audio file (WAV, MP3, etc.)
 
     Returns:
         Full transcript as a string
     """
-    client = speech.SpeechClient()
-
     audio_path = Path(audio_path)
-    with open(audio_path, "rb") as f:
-        content = f.read()
+    if not audio_path.exists():
+        raise RuntimeError(f"Audio file not found: {audio_path}")
 
-    audio = speech.RecognitionAudio(content=content)
+    model = _get_model()
 
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=16000,
-        language_code="en-US",
-        enable_automatic_punctuation=True,
-        model="latest_long",
+    logger.info(f"Transcribing: {audio_path}")
+    segments, info = model.transcribe(
+        str(audio_path),
+        language="en",
+        beam_size=5,
+        vad_filter=True,  # Filter out silence
     )
 
-    # Check file size to determine sync vs async
-    # Sync API limit is ~1 minute of audio (~960KB for 16kHz mono 16-bit)
-    file_size = audio_path.stat().st_size
-
-    if file_size < 960_000:
-        # Short audio: synchronous recognition
-        logger.info("Using synchronous recognition (short audio)")
-        response = client.recognize(config=config, audio=audio)
-    else:
-        # Long audio: asynchronous recognition
-        logger.info("Using long-running recognition (long audio)")
-        operation = client.long_running_recognize(config=config, audio=audio)
-        response = operation.result(timeout=300)
-
-    # Combine all results into one transcript
+    # Collect all segment texts
     transcript_parts = []
-    for result in response.results:
-        if result.alternatives:
-            transcript_parts.append(result.alternatives[0].transcript)
+    for segment in segments:
+        transcript_parts.append(segment.text.strip())
 
     transcript = " ".join(transcript_parts)
 
     if not transcript.strip():
-        logger.warning("No transcript was generated — audio may be silent or non-English")
+        logger.warning("No transcript generated — audio may be silent or non-English")
         return "(No speech detected in this reel)"
 
-    logger.info(f"Transcription complete: {len(transcript)} characters")
+    logger.info(f"Transcription complete: {len(transcript)} chars, language={info.language} (prob={info.language_probability:.2f})")
     return transcript

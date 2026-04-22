@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://100.70.106.65:11434")
 MODEL = "gemma4:e4b"
 
-SUMMARY_PROMPT = """You are an expert content analyst. Given the transcript and description of an Instagram Reel, generate a clear, insightful summary that captures the key message, context, and value of the content.
+SUMMARY_PROMPT = """Analyze this Instagram Reel's transcript and description. Produce a brief, no-fluff summary in bullet-point form that someone could copy-paste into their notes.
 
 **Description:**
 {description}
@@ -22,13 +22,21 @@ SUMMARY_PROMPT = """You are an expert content analyst. Given the transcript and 
 **Transcript:**
 {transcript}
 
-Write a concise but comprehensive summary (2-4 paragraphs) that:
-- Identifies the main topic and purpose of the reel
-- Highlights key points, insights, or advice shared
-- Notes the tone and target audience
-- Mentions any calls to action or recommendations
+Format your response EXACTLY like this (use these headers, use bullet points):
 
-Respond with ONLY the summary text, no headers or labels."""
+**Topic:** one-line description of what this reel is about
+
+**Key Takeaways:**
+- (most important point 1)
+- (most important point 2)
+- (etc.)
+
+**Notable Quotes/Claims:**
+- "exact quote or paraphrased claim" (if any)
+
+**Who This Is For:** one-line target audience
+
+Keep it short and dense. No filler words. No introductions. Just the useful information."""
 
 LISTS_PROMPT = """You are an expert content analyst. Given the transcript and description of an Instagram Reel, extract any lists, steps, tips, recommendations, or enumerable items mentioned in the content.
 

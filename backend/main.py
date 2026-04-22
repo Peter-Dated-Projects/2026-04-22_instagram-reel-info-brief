@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR", "./media"))
 MEDIA_DIR.mkdir(exist_ok=True)
 
+# Semaphore to limit concurrent processing (queue excess requests)
+MAX_CONCURRENT = 2
+processing_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+active_jobs = 0
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -119,8 +124,9 @@ async def analyze_reel(request: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="Invalid URL. Please provide an Instagram reel URL.")
 
     async def event_generator():
+        global active_jobs
         try:
-            # ── Check cache first ──
+            # ── Check cache first (bypasses queue) ──
             cached = await get_cached_reel(url)
             if cached:
                 logger.info(f"Cache hit for URL: {url}")
@@ -145,80 +151,89 @@ async def analyze_reel(request: AnalyzeRequest):
                 yield {"event": "done", "data": "{}"}
                 return
 
-            # ── Step 1: Download ──
-            yield {"event": "step", "data": json.dumps({"step": 1, "label": "Downloading reel..."})}
-            await asyncio.sleep(0)  # yield control so event flushes
+            # ── Queue management ──
+            active_jobs += 1
+            if processing_semaphore.locked():
+                queue_pos = active_jobs - MAX_CONCURRENT
+                yield {"event": "queued", "data": json.dumps({"position": max(queue_pos, 1)})}
 
-            cookie_jar = None
-            if auth_service.is_authenticated:
-                try:
-                    cookie_jar = auth_service.get_cookie_jar_path()
-                except Exception:
-                    cookie_jar = None
+            async with processing_semaphore:
+                # ── Step 1: Download ──
+                yield {"event": "step", "data": json.dumps({"step": 1, "label": "Downloading reel..."})}
+                await asyncio.sleep(0)
 
-            result = await asyncio.to_thread(download_reel, url, cookie_jar)
-            video_id = result["video_id"]
-            video_path = result["video_path"]
-            metadata_dict = result["metadata"]
+                cookie_jar = None
+                if auth_service.is_authenticated:
+                    try:
+                        cookie_jar = auth_service.get_cookie_jar_path()
+                    except Exception:
+                        cookie_jar = None
 
-            # Send video + metadata immediately
-            yield {"event": "video", "data": json.dumps({"video_id": video_id})}
-            yield {
-                "event": "metadata",
-                "data": json.dumps({
-                    "username": metadata_dict.get("username", "unknown"),
-                    "description": metadata_dict.get("description", ""),
-                    "title": metadata_dict.get("title", ""),
+                result = await asyncio.to_thread(download_reel, url, cookie_jar)
+                video_id = result["video_id"]
+                video_path = result["video_path"]
+                metadata_dict = result["metadata"]
+
+                # Send video + metadata immediately
+                yield {"event": "video", "data": json.dumps({"video_id": video_id})}
+                yield {
+                    "event": "metadata",
+                    "data": json.dumps({
+                        "username": metadata_dict.get("username", "unknown"),
+                        "description": metadata_dict.get("description", ""),
+                        "title": metadata_dict.get("title", ""),
+                        "thumbnail_url": metadata_dict.get("thumbnail_url"),
+                        "like_count": metadata_dict.get("like_count"),
+                        "view_count": metadata_dict.get("view_count"),
+                        "comment_count": metadata_dict.get("comment_count"),
+                    }),
+                }
+
+                # ── Step 2: Extract audio ──
+                yield {"event": "step", "data": json.dumps({"step": 2, "label": "Extracting audio..."})}
+                audio_path = await asyncio.to_thread(extract_audio, video_path)
+
+                # ── Step 3: Transcribe ──
+                yield {"event": "step", "data": json.dumps({"step": 3, "label": "Transcribing speech..."})}
+                transcript = await asyncio.to_thread(transcribe_audio, audio_path)
+                yield {"event": "transcript", "data": json.dumps({"transcript": transcript})}
+
+                # ── Step 4: AI analysis ──
+                yield {"event": "step", "data": json.dumps({"step": 4, "label": "Generating AI insights..."})}
+                description = metadata_dict.get("description", "")
+
+                # Run summary and lists in parallel
+                summary_task = asyncio.create_task(generate_summary(transcript, description))
+                lists_task = asyncio.create_task(extract_lists(transcript, description))
+
+                summary = await summary_task
+                yield {"event": "summary", "data": json.dumps({"summary": summary})}
+
+                key_lists = await lists_task
+                yield {"event": "lists", "data": json.dumps({"key_lists": key_lists})}
+
+                # ── Save to DB ──
+                await save_reel(url, {
+                    "video_id": video_id,
+                    "username": metadata_dict.get("username"),
+                    "description": metadata_dict.get("description"),
+                    "title": metadata_dict.get("title"),
                     "thumbnail_url": metadata_dict.get("thumbnail_url"),
                     "like_count": metadata_dict.get("like_count"),
                     "view_count": metadata_dict.get("view_count"),
                     "comment_count": metadata_dict.get("comment_count"),
-                }),
-            }
+                    "transcript": transcript,
+                    "summary": summary,
+                    "key_lists": key_lists,
+                })
 
-            # ── Step 2: Extract audio ──
-            yield {"event": "step", "data": json.dumps({"step": 2, "label": "Extracting audio..."})}
-            audio_path = await asyncio.to_thread(extract_audio, video_path)
-
-            # ── Step 3: Transcribe ──
-            yield {"event": "step", "data": json.dumps({"step": 3, "label": "Transcribing speech..."})}
-            transcript = await asyncio.to_thread(transcribe_audio, audio_path)
-            yield {"event": "transcript", "data": json.dumps({"transcript": transcript})}
-
-            # ── Step 4: AI analysis ──
-            yield {"event": "step", "data": json.dumps({"step": 4, "label": "Generating AI insights..."})}
-            description = metadata_dict.get("description", "")
-
-            # Run summary and lists in parallel
-            summary_task = asyncio.create_task(generate_summary(transcript, description))
-            lists_task = asyncio.create_task(extract_lists(transcript, description))
-
-            summary = await summary_task
-            yield {"event": "summary", "data": json.dumps({"summary": summary})}
-
-            key_lists = await lists_task
-            yield {"event": "lists", "data": json.dumps({"key_lists": key_lists})}
-
-            # ── Save to DB ──
-            await save_reel(url, {
-                "video_id": video_id,
-                "username": metadata_dict.get("username"),
-                "description": metadata_dict.get("description"),
-                "title": metadata_dict.get("title"),
-                "thumbnail_url": metadata_dict.get("thumbnail_url"),
-                "like_count": metadata_dict.get("like_count"),
-                "view_count": metadata_dict.get("view_count"),
-                "comment_count": metadata_dict.get("comment_count"),
-                "transcript": transcript,
-                "summary": summary,
-                "key_lists": key_lists,
-            })
-
-            yield {"event": "done", "data": "{}"}
+                yield {"event": "done", "data": "{}"}
 
         except Exception as e:
             logger.error(f"Pipeline error: {e}", exc_info=True)
             yield {"event": "error", "data": json.dumps({"detail": str(e)})}
+        finally:
+            active_jobs = max(0, active_jobs - 1)
 
     return EventSourceResponse(event_generator())
 

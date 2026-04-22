@@ -45,7 +45,7 @@ class ProcessedReel(Base):
     transcript = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     key_lists = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 def normalize_url(url: str) -> str:

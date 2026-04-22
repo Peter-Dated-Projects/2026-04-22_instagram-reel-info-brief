@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+
 interface KeyList {
   title: string;
   items: string[];
@@ -9,6 +12,38 @@ interface InsightsPanelProps {
   summary: string | null;
   keyLists: KeyList[];
   loading: boolean;
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <button
+      className="btn-copy"
+      onClick={handleCopy}
+      title={copied ? "Copied!" : "Copy to clipboard"}
+    >
+      {copied ? "✓ Copied" : "📋 Copy"}
+    </button>
+  );
 }
 
 export default function InsightsPanel({
@@ -85,13 +120,10 @@ export default function InsightsPanel({
             <div className="insight-card__header">
               <span className="insight-card__icon">📝</span>
               <span className="insight-card__title">Summary</span>
+              <CopyButton text={summary} />
             </div>
-            <div className="insight-card__body">
-              {summary.split("\n").map((paragraph, i) => (
-                <p key={i} style={{ marginBottom: i < summary.split("\n").length - 1 ? "12px" : 0 }}>
-                  {paragraph}
-                </p>
-              ))}
+            <div className="insight-card__body markdown-content">
+              <ReactMarkdown>{summary}</ReactMarkdown>
             </div>
           </div>
         )}
@@ -99,7 +131,12 @@ export default function InsightsPanel({
         {/* Lists */}
         {keyLists.map((list, idx) => (
           <div className="list-card" key={idx}>
-            <div className="list-card__title">{list.title}</div>
+            <div className="list-card__header">
+              <div className="list-card__title">{list.title}</div>
+              <CopyButton
+                text={list.items.map((item, i) => `${i + 1}. ${item}`).join("\n")}
+              />
+            </div>
             <ul className="list-card__items">
               {list.items.map((item, i) => (
                 <li className="list-card__item" key={i}>
