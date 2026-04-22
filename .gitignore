@@ -1,0 +1,32 @@
+# ─── Python / Backend ───
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+backend/.venv/
+backend/media/
+backend/sessions/
+*.egg-info/
+
+# ─── Node / Frontend ───
+node_modules/
+frontend/.next/
+frontend/out/
+
+# ─── Environment ───
+backend/.env
+.env.local
+.env*.local
+
+# ─── Credentials ───
+google_cloud_key.json
+
+# ─── OS ───
+.DS_Store
+Thumbs.db
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.swp
+*.swo
