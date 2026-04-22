@@ -4,11 +4,12 @@ import { useState } from "react";
 
 interface LoginGateProps {
   onLogin: (username: string) => void;
+  onSkip?: () => void;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-export default function LoginGate({ onLogin }: LoginGateProps) {
+export default function LoginGate({ onLogin, onSkip }: LoginGateProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,8 +49,7 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
         <div className="login-card__icon">📷</div>
         <h1 className="login-card__title">Reel Brief</h1>
         <p className="login-card__desc">
-          Sign in with your Instagram account to unlock AI-powered reel
-          insights, summaries, and structured breakdowns.
+          Sign in to access private reels. Public reels work without login.
         </p>
 
         <form className="login-card__form" onSubmit={handleSubmit}>
@@ -112,6 +112,16 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
             )}
           </button>
         </form>
+
+        {onSkip && (
+          <button
+            className="btn btn--ghost"
+            onClick={onSkip}
+            style={{ marginTop: "16px", width: "100%" }}
+          >
+            ← Back to app
+          </button>
+        )}
       </div>
     </div>
   );

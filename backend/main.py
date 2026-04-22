@@ -95,18 +95,20 @@ async def analyze_reel(request: AnalyzeRequest):
     3. Transcribe audio (Google STT)
     4. Generate summary + lists (Ollama gemma4:e4b)
     """
-    if not auth_service.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please login first.")
-
     # Validate URL
     url = request.url.strip()
     if "instagram.com" not in url:
         raise HTTPException(status_code=400, detail="Invalid URL. Please provide an Instagram reel URL.")
 
     try:
-        # Step 1: Download reel
+        # Step 1: Download reel (uses cookies if logged in, otherwise attempts public download)
         logger.info(f"[1/4] Downloading reel: {url}")
-        cookie_jar = auth_service.get_cookie_jar_path()
+        cookie_jar = None
+        if auth_service.is_authenticated:
+            try:
+                cookie_jar = auth_service.get_cookie_jar_path()
+            except Exception:
+                cookie_jar = None
         result = download_reel(url, cookie_jar)
         video_id = result["video_id"]
         video_path = result["video_path"]

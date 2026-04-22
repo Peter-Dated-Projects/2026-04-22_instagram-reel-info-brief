@@ -34,12 +34,14 @@ interface AnalysisResult {
 
 export default function Home() {
   const [user, setUser] = useState<string | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = (username: string) => {
     setUser(username);
+    setShowLogin(false);
   };
 
   const handleAnalyze = async (url: string) => {
@@ -70,9 +72,14 @@ export default function Home() {
     }
   };
 
-  // Show login gate if not authenticated
-  if (!user) {
-    return <LoginGate onLogin={handleLogin} />;
+  // Show login modal if user clicked the login button
+  if (showLogin) {
+    return (
+      <LoginGate
+        onLogin={handleLogin}
+        onSkip={() => setShowLogin(false)}
+      />
+    );
   }
 
   return (
@@ -86,10 +93,19 @@ export default function Home() {
             <div className="header__subtitle">AI-Powered Reel Insights</div>
           </div>
         </div>
-        <div className="header__user">
-          <span className="header__user-dot" />
-          @{user}
-        </div>
+        {user ? (
+          <div className="header__user">
+            <span className="header__user-dot" />
+            @{user}
+          </div>
+        ) : (
+          <button
+            className="btn btn--login-header"
+            onClick={() => setShowLogin(true)}
+          >
+            🔒 Login for private reels
+          </button>
+        )}
       </header>
 
       {/* URL Input */}
